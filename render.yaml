@@ -1,0 +1,20 @@
+services:
+  - type: worker
+    name: zynt-films
+    runtime: python
+    region: frankfurt
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    autoDeploy: true
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: OWNER_ID
+        value: "1784758404"
+      - key: DATA_DIR
+        value: "/var/data"
+    disk:
+      name: zynt-films-data
+      mountPath: /var/data
+      sizeGB: 10
