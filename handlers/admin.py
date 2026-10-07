@@ -1,5 +1,6 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -24,6 +25,71 @@ async def notify_role(bot, uid, added):
             await bot.send_message(uid,'ℹ️ Ваша роль администратора ZYNT FILMS была снята.\nСпасибо за вашу работу! ❤️')
     except Exception:
         pass
+
+@router.message(Command("versionup"))
+async def versionup_cmd(m: Message):
+    if not await is_admin(m.from_user.id):
+        return
+    row = await execute('SELECT version,description,image_file_id FROM bot_version WHERE id=1', one=True)
+    version, description, image_file_id = row or ('1.0.0', '', None)
+    caption = f"🚀 <b>ZYNT FILMS — версия {version}</b>\n\n{description or 'Информация об обновлении пока не добавлена.'}"
+    if image_file_id:
+        await m.answer_photo(image_file_id, caption=caption, parse_mode='HTML')
+    else:
+        await m.answer(caption, parse_mode='HTML')
+
+@router.callback_query(F.data=='a:version')
+async def version_settings(c: CallbackQuery, state: FSMContext):
+    if not await guard(c): return
+    await state.clear()
+    row = await execute('SELECT version,description,image_file_id FROM bot_version WHERE id=1', one=True)
+    version, description, image_file_id = row or ('1.0.0', '', None)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='🔢 Изменить версию', callback_data='a:version:editver')],
+        [InlineKeyboardButton(text='📝 Изменить описание', callback_data='a:version:editdesc')],
+        [InlineKeyboardButton(text=f"🖼 Изображение {'✅' if image_file_id else '—'}", callback_data='a:version:editimg')],
+        [InlineKeyboardButton(text='👁 Предпросмотр', callback_data='a:version:preview')],
+        [InlineKeyboardButton(text='◀️ Админка', callback_data='a:home')]
+    ])
+    text = f"🚀 <b>Версия / обновление</b>\n\n<b>Версия:</b> <code>{version}</code>\n<b>Описание:</b> {description or '—'}\n<b>Изображение:</b> {'установлено' if image_file_id else 'нет'}"
+    await c.answer()
+    await c.message.edit_text(text, reply_markup=kb, parse_mode='HTML')
+
+@router.callback_query(F.data=='a:version:editver')
+async def version_editver(c: CallbackQuery, state: FSMContext):
+    if not await guard(c): return
+    await state.set_state(A.action)
+    await state.update_data(action='version_version')
+    await c.answer()
+    await c.message.edit_text('🔢 Отправьте номер новой версии.\nНапример: <code>2.1.0</code>', reply_markup=back(), parse_mode='HTML')
+
+@router.callback_query(F.data=='a:version:editdesc')
+async def version_editdesc(c: CallbackQuery, state: FSMContext):
+    if not await guard(c): return
+    await state.set_state(A.action)
+    await state.update_data(action='version_description')
+    await c.answer()
+    await c.message.edit_text('📝 Отправьте краткое описание обновления.', reply_markup=back(), parse_mode='HTML')
+
+@router.callback_query(F.data=='a:version:editimg')
+async def version_editimg(c: CallbackQuery, state: FSMContext):
+    if not await guard(c): return
+    await state.set_state(A.action)
+    await state.update_data(action='version_image')
+    await c.answer()
+    await c.message.edit_text('🖼 Отправьте фотографию для сообщения /versionup.', reply_markup=back(), parse_mode='HTML')
+
+@router.callback_query(F.data=='a:version:preview')
+async def version_preview(c: CallbackQuery):
+    if not await guard(c): return
+    row = await execute('SELECT version,description,image_file_id FROM bot_version WHERE id=1', one=True)
+    version, description, image_file_id = row or ('1.0.0', '', None)
+    caption = f"🚀 <b>ZYNT FILMS — версия {version}</b>\n\n{description or 'Информация об обновлении пока не добавлена.'}"
+    await c.answer()
+    if image_file_id:
+        await c.message.answer_photo(image_file_id, caption=caption, parse_mode='HTML')
+    else:
+        await c.message.answer(caption, parse_mode='HTML')
 
 @router.message(F.text=='/admin')
 async def admin_cmd(m:Message):
@@ -249,6 +315,26 @@ async def broadcast(c:CallbackQuery,state:FSMContext):
 async def admin_input(m:Message,state:FSMContext):
     if not await is_admin(m.from_user.id):return
     data=await state.get_data(); action=data.get('action')
+    if action=='version_version':
+        version=(m.text or '').strip()
+        if not version or len(version)>30:
+            await m.answer('❌ Введите корректный номер версии, например 2.1.0.'); return
+        await execute('UPDATE bot_version SET version=? WHERE id=1',(version,))
+        await m.answer('✅ Номер версии обновлён.', reply_markup=menu(m.from_user.id==OWNER_ID))
+        await state.clear(); return
+    if action=='version_description':
+        description=m.text or ''
+        if len(description)>4000:
+            await m.answer('❌ Описание слишком длинное. Максимум 4000 символов.'); return
+        await execute('UPDATE bot_version SET description=? WHERE id=1',(description,))
+        await m.answer('✅ Описание обновления сохранено.', reply_markup=menu(m.from_user.id==OWNER_ID))
+        await state.clear(); return
+    if action=='version_image':
+        if not m.photo:
+            await m.answer('❌ Отправьте фотографию.'); return
+        await execute('UPDATE bot_version SET image_file_id=? WHERE id=1',(m.photo[-1].file_id,))
+        await m.answer('✅ Изображение обновления сохранено.', reply_markup=menu(m.from_user.id==OWNER_ID))
+        await state.clear(); return
     if action=='movie_video':
         if not m.video: await m.answer('❌ Отправьте именно видео.'); return
         movie=data.get('movie',{}); movie['video']=m.video.file_id

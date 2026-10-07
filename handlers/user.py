@@ -42,6 +42,23 @@ async def show_home(bot, chat_id, old=None):
         return await replace_screen(bot,chat_id,old,text,subscription_check(rows),'subscription')
     return await replace_screen(bot,chat_id,old,f'🎬 <b>{BOT_NAME}</b>\n\nДобро пожаловать!\n\nВыберите действие ниже.',main(),'home')
 
+async def require_subscription_callback(c: CallbackQuery) -> bool:
+    rows, missing = await check_required_channels(c.bot, c.from_user.id)
+    if rows and missing:
+        await c.answer('🔐 Сначала подпишитесь на обязательные каналы.', show_alert=True)
+        await show_home(c.bot, c.from_user.id, c.message)
+        return False
+    return True
+
+async def require_subscription_message(m: Message, state: FSMContext) -> bool:
+    rows, missing = await check_required_channels(m.bot, m.from_user.id)
+    if rows and missing:
+        await state.clear()
+        await m.answer('🔐 Чтобы продолжить, подпишитесь на все обязательные каналы.')
+        await show_home(m.bot, m.chat.id)
+        return False
+    return True
+
 @router.message(CommandStart())
 async def start(m: Message, state: FSMContext):
     await state.clear()
@@ -65,16 +82,19 @@ async def checksub(c:CallbackQuery):
 
 @router.callback_query(F.data=='u:home')
 async def home(c:CallbackQuery,state:FSMContext):
+    if not await require_subscription_callback(c): return
     await state.clear(); await c.answer(); await show_home(c.bot,c.from_user.id,c.message)
 
 @router.callback_query(F.data=='u:search')
 async def search(c:CallbackQuery,state:FSMContext):
+    if not await require_subscription_callback(c): return
     await c.answer(); await state.set_state(Search.number)
     msg=await replace_screen(c.bot,c.from_user.id,c.message,'🔎 <b>Поиск фильма</b>\n\nВведите номер фильма.',back(),'search')
     await state.update_data(screen_message_id=msg.message_id)
 
 @router.message(Search.number)
 async def search_number(m:Message,state:FSMContext):
+    if not await require_subscription_message(m, state): return
     number=(m.text or '').strip(); await delete_user_input(m); await clear_saved_screen(m.bot,m.chat.id,state)
     movie_row=await execute('SELECT number,title,description,year,genre,poster_file_id FROM movies WHERE number=?',(number,),one=True)
     await execute('UPDATE users SET searches=searches+1 WHERE id=?',(m.from_user.id,))
@@ -92,6 +112,7 @@ async def search_number(m:Message,state:FSMContext):
 
 @router.callback_query(F.data.startswith('u:watch:'))
 async def watch(c:CallbackQuery):
+    if not await require_subscription_callback(c): return
     if not await active(c.from_user.id): await c.answer('🔒 Ваша подписка не активна.',show_alert=True); return
     number=c.data.split(':',2)[2]
     row=await execute('SELECT title,video_file_id FROM movies WHERE number=?',(number,),one=True)
@@ -104,11 +125,13 @@ async def watch(c:CallbackQuery):
 
 @router.callback_query(F.data=='u:plans')
 async def plan_screen(c:CallbackQuery):
+    if not await require_subscription_callback(c): return
     rows=await execute('SELECT days,stars FROM plans WHERE enabled=1 ORDER BY days',fetch=True)
     await c.answer(); await replace_screen(c.bot,c.from_user.id,c.message,'💎 <b>Подписка ZYNT FILMS</b>\n\nВыберите тариф. Оплата проходит внутри Telegram Stars.',plans(rows),'subscription')
 
 @router.callback_query(F.data.startswith('u:buy:'))
 async def buy(c:CallbackQuery):
+    if not await require_subscription_callback(c): return
     days=int(c.data.split(':')[2]); row=await execute('SELECT stars FROM plans WHERE days=? AND enabled=1',(days,),one=True)
     if not row: await c.answer('Тариф недоступен.',show_alert=True); return
     await c.answer(); await c.bot.send_invoice(c.from_user.id,f'ZYNT FILMS — {days} дней',f'Доступ к каталогу на {days} дней.',payload=f'sub:{days}:',currency='XTR',prices=[LabeledPrice(label=f'{days} дней',amount=row[0])])
@@ -166,6 +189,7 @@ async def successful_payment(m:Message,state:FSMContext):
 
 @router.callback_query(F.data=='u:profile')
 async def profile_screen(c:CallbackQuery):
+    if not await require_subscription_callback(c): return
     row=await execute('SELECT searches,views,referral_paid_count,referral_level,referral_balance,referral_bonus_claimed FROM users WHERE id=?',(c.from_user.id,),one=True)
     exp=await expiry(c.from_user.id); now=__import__('services.subscription',fromlist=['now']).now()
     if exp and exp>now:
@@ -178,6 +202,7 @@ async def profile_screen(c:CallbackQuery):
 
 @router.callback_query(F.data=='u:ref')
 async def ref_screen(c:CallbackQuery):
+    if not await require_subscription_callback(c): return
     row=await execute('SELECT referral_paid_count,referral_level,referral_balance,referral_bonus_claimed FROM users WHERE id=?',(c.from_user.id,),one=True) or (0,0,0,0)
     count,level,balance,claimed=row; me=await c.bot.me(); link=f'https://t.me/{me.username}?start=ref_{c.from_user.id}'
     text=f'👥 <b>Реферальная система</b>\n\n🔗 Ваша ссылка:\n<code>{link}</code>\n\n🥉 1 уровень — 1 оплата → 5%\n🥈 2 уровень — 10 оплат → 10%\n🥇 3 уровень — 25 оплат → 15%\n\n✅ Оплативших приглашённых: <b>{count}</b>\n🏆 Уровень: <b>{level}</b>\n💰 Баланс: <b>{balance:.2f} ⭐</b>\n🎁 Бонус +3 дня: <b>{"получен ✅" if claimed else "после 10 оплат"}</b>'
@@ -185,12 +210,14 @@ async def ref_screen(c:CallbackQuery):
 
 @router.callback_query(F.data=='u:promo')
 async def promo_start(c:CallbackQuery,state:FSMContext):
+    if not await require_subscription_callback(c): return
     await c.answer(); await state.set_state(Promo.code)
     msg=await replace_screen(c.bot,c.from_user.id,c.message,'🎟 <b>Промокод</b>\n\nВведите код одним сообщением.',back(),'promo')
     await state.update_data(screen_message_id=msg.message_id)
 
 @router.message(Promo.code)
 async def promo_apply(m:Message,state:FSMContext):
+    if not await require_subscription_message(m, state): return
     code=(m.text or '').strip().upper(); await delete_user_input(m); await clear_saved_screen(m.bot,m.chat.id,state)
     row=await execute('SELECT days,discount,max_uses,uses,enabled FROM promo_codes WHERE code=?',(code,),one=True)
     if not row or not row[4]: await m.answer('❌ Промокод недействителен.',reply_markup=main()); await state.clear(); return
@@ -208,6 +235,7 @@ async def promo_apply(m:Message,state:FSMContext):
 
 @router.callback_query(F.data=='u:promo_pay')
 async def promo_buy(c:CallbackQuery,state:FSMContext):
+    if not await require_subscription_callback(c): return
     data=await state.get_data(); code=data.get('code'); days=data.get('days'); price=data.get('price')
     if not code or not days or price is None: await c.answer('Сначала примените промокод.',show_alert=True); return
     p=await execute('SELECT days,discount,max_uses,uses,enabled FROM promo_codes WHERE code=?',(code,),one=True)
