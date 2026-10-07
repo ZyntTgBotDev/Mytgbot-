@@ -5,7 +5,8 @@ def menu(owner=False):
         [InlineKeyboardButton(text='🎬 Фильмы',callback_data='a:movies'),InlineKeyboardButton(text='📢 Каналы',callback_data='a:channels')],
         [InlineKeyboardButton(text='🖼 Медиа',callback_data='a:images'),InlineKeyboardButton(text='💎 Тарифы',callback_data='a:plans')],
         [InlineKeyboardButton(text='🎟 Промокоды',callback_data='a:promos'),InlineKeyboardButton(text='📢 Рассылка',callback_data='a:broadcast')],
-        [InlineKeyboardButton(text='👤 Пользователи',callback_data='a:users'),InlineKeyboardButton(text='📊 Статистика',callback_data='a:stats')]
+        [InlineKeyboardButton(text='👤 Пользователи',callback_data='a:users'),InlineKeyboardButton(text='📊 Статистика',callback_data='a:stats')],
+        [InlineKeyboardButton(text='🚀 Версия / обновление',callback_data='a:version')]
     ]
     if owner:
         rows.append([InlineKeyboardButton(text='👑 Администраторы',callback_data='a:admins')])
