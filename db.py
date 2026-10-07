@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS channels(
  invite_url TEXT
 );
 CREATE TABLE IF NOT EXISTS images(key TEXT PRIMARY KEY, file_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS bot_version(
+ id INTEGER PRIMARY KEY CHECK(id=1),
+ version TEXT NOT NULL DEFAULT '1.0.0',
+ description TEXT NOT NULL DEFAULT '',
+ image_file_id TEXT
+);
 CREATE TABLE IF NOT EXISTS plans(
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  days INTEGER UNIQUE NOT NULL,
@@ -102,6 +108,7 @@ async def init_db():
                 pass
         for days, stars in ((7,129),(30,349),(90,649)):
             await db.execute('INSERT OR IGNORE INTO plans(days,stars) VALUES(?,?)',(days,stars))
+        await db.execute("INSERT OR IGNORE INTO bot_version(id,version,description) VALUES(1,'1.0.0','')")
         await db.commit()
 
 async def execute(sql, params=(), *, fetch=False, one=False):
